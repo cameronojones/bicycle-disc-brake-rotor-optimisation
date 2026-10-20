@@ -1,0 +1,59 @@
+name: Build report PDF
+
+on:
+  push:
+    branches:
+      - '**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rotor-report
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out report source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Compile LaTeX report
+        uses: xu-cheng/latex-action@v4
+        with:
+          root_file: main.tex
+          texlive_version: 2025
+          args: -pdf -file-line-error -halt-on-error -interaction=nonstopmode
+
+      - name: Prepare PDF and build information
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s main.pdf
+          cp main.pdf Brake_Rotor_Report.pdf
+          {
+            printf '%s\n\n' 'Latest successfully built working draft. This project is in progress.'
+            printf 'PDF source commit: [%s](https://github.com/%s/commit/%s)\n\n' "$GITHUB_SHA" "$GITHUB_REPOSITORY" "$GITHUB_SHA"
+            printf 'Build: https://github.com/%s/actions/runs/%s\n\n' "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+            printf '%s\n' 'The PDF asset is updated after successful builds. For current source, use Code > Download ZIP on the default branch; the release source archives refer to the original release tag.'
+          } > release-notes.md
+
+      - name: Publish latest draft PDF
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view latest-report > /dev/null 2>&1; then
+            gh release upload latest-report Brake_Rotor_Report.pdf --clobber
+            gh release edit latest-report --title 'Latest working draft report' --notes-file release-notes.md --prerelease
+          else
+            gh release create latest-report Brake_Rotor_Report.pdf --target "$GITHUB_SHA" --title 'Latest working draft report' --notes-file release-notes.md --prerelease --latest=false
+          fi
